@@ -28,10 +28,12 @@ void writeNode(filereader &index, bt_node &node);
 long find(filereader &index, int key, bool addcall = false);
 void print(filereader &index);
 void split(char lineinput[], string &command, int &key);
-void add(filereader &index, int key);
+long add(filereader &index, int key, int parentoffset);
 void writedata(filereader &index);
-void addKey(int key, bt_node &node);
+int addKey(int key, bt_node &node);
 void initializeNode(filereader &index, int offset);
+long splitCurrentNode(filereader &index, bt_node &node, int key, int &median);
+bool isleaf(bt_node &node);
 
 void main(int argc, char* argv[])  {
 
@@ -56,14 +58,14 @@ void main(int argc, char* argv[])  {
 //	writedata(index);
 
 	while ( 1 )  {
-		cin.getline(lineinput, 25);			// get a line of input from cin
-		split(lineinput, command, key);		// split out the command and key if any
-		if ( command == "add" )  {			// if it was an add command
-			index.seek(ROOT, BEGIN);		// ensure index is in proper position
-			add(index, key);				// call add method with the key
+		cin.getline(lineinput, 25);				// get a line of input from cin
+		split(lineinput, command, key);			// split out the command and key if any
+		if ( command == "add" )  {				// if it was an add command
+			index.seek(ROOT, BEGIN);			// ensure index is in proper position
+			add(index, key, index.offset());	// call add method with the key
 		}
-		else if ( command == "find" )  {	// if it was a find command
-			totalfinds++;					// increment total finds
+		else if ( command == "find" )  {		// if it was a find command
+			totalfinds++;						// increment total finds
 			QueryPerformanceCounter(&tstart);						// get start time
 			index.seek(ROOT, BEGIN);								// set index to root node
 			find(index, key);										// perform the find
@@ -88,20 +90,91 @@ void main(int argc, char* argv[])  {
 	}
 }
 
-void add(filereader &index, int key)  {
+long add(filereader &index, int key, int parentoffset)  {
 
+	int offset = index.offset();
 	bt_node node;
 	readNode(index, node);
-	cout << "Node size " << node.n << '\n';
-	if ( node.n < 32 )  {
+	int median = 0;
+	
+	if ( node.n < 32 && isleaf(node) )  {
 		addKey(key, node);
 		writeNode(index, node);
 	}
-	else 
-		cout << "\nOTHER CASES\n";
+	else if ( node.n == 32 )  {
+		int newnodeoffset = splitCurrentNode(index, node, key, median);
+		int loffset = index.offset();
+		index.seek(0, END);
+		int eof = index.offset();
+		initializeNode(index, eof);
+		bt_node pt;
+		readNode(index, pt);
+		int addpos = addKey(median, pt);
+		pt.child[0] = offset;
+		pt.child[1] = newnodeoffset;
+		writeNode(index, pt);
+		ROOT = index.offset();
+		index.seek(loffset, BEGIN);	
+	}
+	else  {								// find offset and recurse add
+		index.seek(find(index, key, true), BEGIN);
+		add(index, key, offset);
+		return offset;
+	}
+	index.seek(offset, BEGIN);
+	return offset;
 }
 
-void addKey(int key, bt_node &node)  {
+long splitCurrentNode(filereader &index, bt_node &node, int key, int &median)  {
+
+	bt_node newnode;
+	int overflow[33] = {};
+	int offset = index.offset();
+	bool flag = false;
+	index.seek(0, END);
+	int newnodeoffset = index.offset();
+
+	for (int i = 0; i < 33; i++)  {
+		if ( key > node.key[i] )  {
+			overflow[i] = node.key[i];
+		}
+		else if ( flag == false )  {
+			overflow[i] = key;
+			flag = true;
+		}
+		else  {
+			overflow[i] = node.key[i - 1];
+		}
+	}
+	if ( flag == false )
+		overflow[32] = key;
+
+	node.n = 16;
+	newnode.n = 16;
+	for (int i = 16; i < 33; i++)  {
+		newnode.key[i - 16] = node.key[i];
+		newnode.child[i - 16] = node.child[i]; 
+	}
+	newnode.child[17] = -1;
+	median = overflow[16];
+	writeNode(index, newnode);
+
+	index.seek(offset, BEGIN);
+	writeNode(index, node);
+	return newnodeoffset;
+}
+
+bool isleaf(bt_node &node)  {
+
+	for (int i = 0; i < node.n; i++)  {
+		if ( node.child[i] != -1 ) {
+			return false;
+		}
+	}
+	return true;
+}
+
+int addKey(int key, bt_node &node)  {
 
 	int swap1 = 0;
 	int swap2 = 0;
@@ -110,7 +183,7 @@ void addKey(int key, bt_node &node)  {
 	if ( node.n == 0 ) {
 		node.n++;
 		node.key[0] = key;
-		return;
+		return node.n;
 	}
 
 	for (int i = 0; i < node.n; i++)  {
@@ -124,7 +197,7 @@ void addKey(int key, bt_node &node)  {
 	if ( swappos == -1 )  {
 		node.key[node.n] = key;
 		node.n++;
-		return;
+		return node.n;
 	}
 	else  {
 		swap1 = node.key[swappos];
@@ -136,6 +209,7 @@ void addKey(int key, bt_node &node)  {
 		}
 		node.n++;
 	}
+	return node.n;
 }
 
 long find(filereader &index, int key, bool addcall)  {		// index must be pointing to root node at first call
