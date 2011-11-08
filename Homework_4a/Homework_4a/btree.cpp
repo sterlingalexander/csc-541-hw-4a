@@ -8,34 +8,34 @@ using std::cin;
 using std::cout;
 
 int ROOT = 0;											// BTree root node global
-const int NODE_SIZE = sizeof(int) + sizeof(long) * 2;	// node size, system independent
+const int NODE_SIZE = sizeof(int) * 33 + sizeof(long) * 33;	// node size, system independent
+
+struct bt_node {
+	int n;				// number of keys in the node
+	int key[32];		// array for record keys
+	long child[33];		// array for child node offsets
+};
 
 struct qobj {			// queue object for printing
-	int key;			// record key
-	long lp;			// left pointer (offset)
-	long rp;			// right pointer (offset)
 	long offset;		// offset of record
+	int key[32];		// array for keys
 	qobj *prev;			// prev pointer
 	qobj *next;			// next pointer
 };
 
-long find(filereader &index, int record);							// searches for target key
-int add(filereader &index, int to_insert);							// adds key to index
-void writeKey(filereader &index, int key);							// writes key to index
-void readNode(filereader &index, int &key, long &lp, long &rp);		// reads node from index
-void readNode(filereader &index, qobj *read);						// reads node from index
-long size(filereader &index);										// gets file size
-void print(filereader &index);										// prints current tree
-void split(char lineinput[], string &command, int &key);			// splits input commands
-void printQueue(qobj *head, qobj *tail, int count);					// prints current queue
-void addQueue(qobj *insert, qobj *head, qobj *tail);				// adds nodes to queue
-void refillQueue(filereader &index, qobj *head, qobj *tail);		// adds next tree level to queue
+void readNode(filereader &index, bt_node &node);
+void writeNode(filereader &index, bt_node &node);
+long find(filereader &index, int key, bool addcall = false);
+void print(filereader &index);
+void split(char lineinput[], string &command, int &key);
+void add(filereader &index, int key);
+void writedata(filereader &index);
 
 void main(int argc, char* argv[])  {
 
 	string fname = argv[1];					// Get passed in args
 	filereader index;						// Create filereader object
-	char lineinput[32] = {};					// Console input string
+	char lineinput[32] = {};				// Console input string
 	string command = "";					// String object to parse from command line
 	int key = 0;							// Key to be added to index
 	string token[2] = {};					// array of strings to hold tokens
@@ -50,15 +50,19 @@ void main(int argc, char* argv[])  {
 	int totalfinds = 0;						// Total number of times the find() routine is called
 	double telapsed = 0;					// Accumulator for elapsed time
 
+	writedata(index);
+
 	while ( 1 )  {
 		cin.getline(lineinput, 25);			// get a line of input from cin
 		split(lineinput, command, key);		// split out the command and key if any
 		if ( command == "add" )  {			// if it was an add command
+			index.seek(ROOT, BEGIN);		// ensure index is in proper position
 			add(index, key);				// call add method with the key
 		}
 		else if ( command == "find" )  {	// if it was a find command
 			totalfinds++;					// increment total finds
 			QueryPerformanceCounter(&tstart);						// get start time
+			index.seek(ROOT, BEGIN);								// set index to root node
 			find(index, key);										// perform the find
 			QueryPerformanceCounter(&tfinish);						// get the end time
 			tdiff.QuadPart = tfinish.QuadPart - tstart.QuadPart;	// get the time difference
@@ -81,47 +85,282 @@ void main(int argc, char* argv[])  {
 	}
 }
 
+void add(filereader &index, int key)  {
+
+	bt_node node;
+
+	readNode(index, node);
+}
+
+long find(filereader &index, int key, bool addcall)  {		// index must be pointing to root node at first call
+
+	int orig_offset = index.offset();
+	//index.seek(ROOT, BEGIN);								// seek to root node
+	bt_node node;
+	readNode(index, node);
+	int indexfound = 0;
+
+	for ( int i = 0; i < node.n; i++ )  {
+		if ( node.key[i] == key )  {
+			if ( addcall == false )  {
+				cout << "\nRecord " << key << " exists.\n";
+			}
+			return -2;
+		}
+		else if ( key > node.key[i] ) {
+			indexfound = i + 1;
+		}
+		else  {
+			indexfound = i;
+			break;
+		}
+	}
+
+	if ( node.child[indexfound] == -1 )  {
+		if ( addcall == false )  {
+			cout << "\nRecord " << key << " does not exist.\n";
+		}
+		index.seek(orig_offset, BEGIN);
+		return -1;
+	}
+	else  {
+		index.seek(node.child[indexfound], BEGIN);
+		return find( index, key, addcall);
+	}
+	index.seek(orig_offset, BEGIN);							// reset file index position
+	return node.child[indexfound];
+}
+
+void readNode(filereader &index, bt_node &node)  {					// filereader must be in position when call is made
+																	// filereader is always reset
+	long offset = index.offset();
+	index.read_raw( (char*) &node.n, sizeof(int) );
+	for (int i = 0; i < 32; i++)  {
+		index.read_raw( (char*) &node.key[i], sizeof(int) );
+	}
+	for (int i = 0; i < 33; i++)  {
+		index.read_raw( (char*) &node.child[i], sizeof(long) );
+	}
+	index.seek(offset, BEGIN);
+}
+
+void writeNode(filereader &index, bt_node &node)  {					// filereader must be in position when call is made
+																	// filereader is always reset
+	long offset = index.offset();
+	index.write_raw( (char*) &node.n, sizeof(int) );
+	for (int i = 0; i < 32; i++)  {
+		index.write_raw( (char*) &node.key[i], sizeof(int) );
+	}
+	for (int i = 0; i < 33; i++)  {
+		index.write_raw( (char*) &node.child[i], sizeof(long) );
+	}
+	index.seek(offset, BEGIN);
+}
+
+void print(filereader &index)  {
+	cout << "STUB\n\n";
+}
+
+void split(char lineinput[], string &command, int &key)  {
+
+	int delim = 0;			// index of delimiter
+	string tmp = "";		// temp string
+	command = "";			// clear command string
+	long size;				// size of string, counts while iterating
+
+	for (size = 0; size < lineinput[size] != '\0'; size++)  {	// iterate string
+		if ( lineinput[size] == ' ')  {				// find delimiters
+			delim = size;							// set delimiter position
+		}
+	}
+
+	if (delim == 0 )  {			// we have a command with no space, no key to add
+		for (int j = 0; lineinput[j] != '\0'; j++)  {
+			command += lineinput[j];		// copy command to command variable
+		}
+		key = 0;							// set key to nonsense value
+		return;
+	}
+
+	for ( int j = 0; j < delim; j++ )  {			// otherwise, parse command
+		command += lineinput[j];
+	}
+	for ( int j = delim + 1; j < size; j++ )  {		// them parse key
+		tmp += lineinput[j];
+	}
+	key = atoi(tmp);								// convert key from string to int
+}
+
+void writedata(filereader &index)  {
+
+	index.seek(0,BEGIN);
+	int n = 32;
+	int inttmp = 0;
+	long lngtmp = -1;
+	long p2 = NODE_SIZE;
+
+	index.write_raw( (char*) &n, sizeof(int) );
+
+	for (int i = 0; i < 32; i++)  {
+		inttmp = (i + 1) * 100;
+		index.write_raw( (char*) &inttmp, sizeof(int) );
+	}
+	index.write_raw( (char*) &p2, sizeof(long) );
+	for (int i = 0; i < 32; i++)  {
+		index.write_raw( (char*) &lngtmp, sizeof(long) );
+	}
+	index.seek(NODE_SIZE, BEGIN);
+	index.write_raw( (char*) &n, sizeof(int) );
+	for (int i = 0; i < 32; i++)  {
+		inttmp = (i + 1) * 1;
+		index.write_raw( (char*) &inttmp, sizeof(int) );
+	}
+	for (int i = 0; i < 33; i++)  {
+		index.write_raw( (char*) &lngtmp, sizeof(long) );
+	}
+	index.seek(0, BEGIN);
+}
+
+/*
+long find(filereader &index, int record);							// searches for target key
+int add(filereader &index, int to_insert);							// adds key to index
+void writeKey(filereader &index, int key);							// writes key to index
+void readNode(filereader &index, int &key, long &lp, long &rp);		// reads node from index
+void readNode(filereader &index, qobj *read);						// reads node from index
+long size(filereader &index);										// gets file size
+void print(filereader &index);										// prints current tree
+void split(char lineinput[], string &command, int &key);			// splits input commands
+void printQueue(qobj *head, qobj *tail, int count);					// prints current queue
+void addQueue(qobj *insert, qobj *head, qobj *tail);				// adds nodes to queue
+void refillQueue(filereader &index, qobj *head, qobj *tail);		// adds next tree level to queue
+void initializeRoot(filereader &index);
+
+
+void initializeNode(filereader &index, int offset)  {				// always returns index at position of beginning of new node
+
+	int zero = 0;
+	long minusone = -1;
+	index.seek(offset, BEGIN);
+	index.write_raw( (char*) &zero, sizeof(int) );
+
+	for ( int i = 0; i < 32; i++ ) {
+		index.write_raw( (char*) &zero, sizeof(int) );
+	}
+	for ( int i = 0; i < 33; i++)  {
+		index.write_raw( (char*) &minusone, sizeof(long) );
+	}
+	index.seek(offset, BEGIN);
+}
+
+void readNode(filereader &index, bt_node &node)  {					// filereader must be in position when call is made
+																	// filereader is always reset
+	long offset = index.offset();
+	index.read_raw( (char*) &node.n, sizeof(int) );
+	for (int i = 0; i < 32; i++)  {
+		index.read_raw( (char*) &node.key[i], sizeof(int) );
+	}
+	for (int i = 0; i < 33; i++)  {
+		index.read_raw( (char*) &node.child[i], sizeof(long) );
+	}
+	index.seek(offset, BEGIN);
+}
+
+void writeNode(filereader &index, bt_node &node)  {					// filereader must be in position when call is made
+																	// filereader is always reset
+	long offset = index.offset();
+	index.write_raw( (char*) &node.n, sizeof(int) );
+	for (int i = 0; i < 32; i++)  {
+		index.write_raw( (char*) &node.key[i], sizeof(int) );
+	}
+	for (int i = 0; i < 33; i++)  {
+		index.write_raw( (char*) &node.child[i], sizeof(long) );
+	}
+	index.seek(offset, BEGIN);
+}
+
 int add(filereader &index, int to_insert)  {
 	
-	long eof_offset = size(index);				// get the offset for EOF
+	int path[33] = {};
+	int pathsize = 0;
+	bt_node node;
+	index.seek(ROOT, BEGIN);
+	readNode(index, node);
+	int parentoffset = -1;
 
-	if ( eof_offset == 0 )  {					// if the file is empty
-		writeKey(index, to_insert);				// write the key and return success value
-		return 1;
-	}
-
-	int key = 0;								// initialize key
-	long lp = 0;								// initialize lp
-	long rp = 0;								// initialize rp
-	index.seek(ROOT, BEGIN);					// seek to beginning of file
-	readNode(index, key, lp, rp);				// read first record
-
-	while ( 1 ) {
-		if ( to_insert < key )  {				// if the new key is less than the key to insert
-			if ( lp < 0 ) {						// if there is not another node at the lp
-				index.seek(-8, CUR);			// seek to lp value
-				index.write_raw( (char*) &eof_offset, sizeof(long) );	// write the offset of the new key to be inserted
-				writeKey(index, to_insert);								// insert the new key
-				return 1;												// return success
-			}
-			else {								// otherwise
-				index.seek(lp, BEGIN);			// seek to the node at the lp
-				readNode(index, key, lp, rp);	// read the node and repeat
-			}
+	while ( 1 )  {
+	
+		if ( node.child[0] == -1 )  {				// if the node is a leaf
+			insert(index, to_insert, node, parentoffset, path, pathsize);
 		}
-		else if ( to_insert > key )  {			// if the new key is greater than the key to insert
-			if ( rp < 0 ) {						// if there is not another node at the rp
-				index.seek(-4, CUR);			// seek to the rp value
-				index.write_raw( (char*) &eof_offset, sizeof(long) );	// write the offset of the new key to be inserted
-				writeKey(index, to_insert);								// write the new key
-				return 1;												// return success
+	
+	}
+}
+
+void insert(filereader &index, int key, bt_node &node, int parentoffset, int path[], int &pathsize)  {
+
+	int pos = 0;
+	int temp = 0;
+	int temp2 = 0;
+
+	if (node.n == 0)  {							// this ONLY happens at the initial root insert
+		node.key[0] = key;
+		node.n++;
+	}
+	else if (node.n < 32)  {							// if the node is not full
+		node.n++;
+		for (int i = 0; i < node.n; i++)  {
+			if ( key < node.key[i] )  {
+				temp = node.key[i];
+				node.key[i] = key;
+				for (int j = i + 1; j < node.n + 1; j++)  {
+					temp2 = node.key[j];
+					node.key[j] = temp;
+					temp = temp2;
+				}
+			return;
 			}
-			else {								// otherwise
-				index.seek(rp, BEGIN);			// seek to the node at the rp
-				readNode(index, key, lp, rp);	// read the node and repeat
-			}
+			else  ;
 		}
 	}
+	else  {
+		int overload[33] = {};
+		int overloadpl[34] = {};
+		int pos = 0;
+		int temp = 0;
+		int temp2 = 0;
+		int tmp = 0;
+		int tmp2 = 0;
+
+		while (key < node.key[pos]) {
+			overload[pos] = node.key[pos];
+			overloadpl[pos] = node.child[pos];
+			pos++;
+		}
+		temp = key;
+		tmp = node.child[pos];
+		for(int i = pos; i < 33; i++)  {
+			temp2 = node.key[i];
+			node.key[i] = temp;
+			temp = temp2;
+			tmp2 = node.child[i];
+			node.child[i] = tmp;
+			tmp = tmp2;
+		}
+		long eof_offset = size(index);				// get the offset for EOF
+		int median = overload[17];
+		bt_node node2;
+		node2.n = 16;
+		node.n = 16;
+		for (int i = 17; i < 33; i++)  {
+			node2.key[i - 17] = overload[i];
+		}
+		node2.child[0] = eof_offset;
+		for (int i = 0; i < 17; i++ )  {
+			node2.child[i + 1] = overloadpl[i + 17];
+		}
+		
+		initializeNode(index, eof_offset);			// create new node
+
 }
 
 long find(filereader &index, int target)  {
@@ -161,12 +400,6 @@ long find(filereader &index, int target)  {
 	}
 }
 
-void readNode(filereader &index, int &key, long &lp, long &rp)  {
-	index.read_raw( (char*) &key, sizeof(int) );	// read key
-	index.read_raw( (char*) &lp, sizeof(long) );	// read lp
-	index.read_raw( (char*) &rp, sizeof(long) );	// read rp
-}
-
 void readNode(filereader &index, qobj *read)  {
 	int offset = index.offset();					// record offset
 	int key = 0;									// initialize key
@@ -181,11 +414,6 @@ void readNode(filereader &index, qobj *read)  {
 
 void writeKey(filereader &index, int key)  {
 
-	long minusone = -1;										// var to hold long -1 value
-	index.seek(0, END);										// seek to file end
-	index.write_raw( (char*) &key, sizeof(int));			// write key
-	index.write_raw( (char*) &minusone, sizeof(long) );		// write null offset
-	index.write_raw( (char*) &minusone, sizeof(long) );		// write null offset
 }
 
 long size(filereader &index)  {
@@ -273,32 +501,5 @@ void addQueue(qobj *insert, qobj *head, qobj *tail)  {
 		prev->next = insert;		// otherwise, set next pointer of prev node to new node
 }
 
-void split(char lineinput[], string &command, int &key)  {
 
-	int delim = 0;			// index of delimiter
-	string tmp = "";		// temp string
-	command = "";			// clear command string
-	long size;				// size of string, counts while iterating
-
-	for (size = 0; size < lineinput[size] != '\0'; size++)  {	// iterate string
-		if ( lineinput[size] == ' ')  {				// find delimiters
-			delim = size;							// set delimiter position
-		}
-	}
-
-	if (delim == 0 )  {			// we have a command with no space, no key to add
-		for (int j = 0; lineinput[j] != '\0'; j++)  {
-			command += lineinput[j];		// copy command to command variable
-		}
-		key = 0;							// set key to nonsense value
-		return;
-	}
-
-	for ( int j = 0; j < delim; j++ )  {			// otherwise, parse command
-		command += lineinput[j];
-	}
-	for ( int j = delim + 1; j < size; j++ )  {		// them parse key
-		tmp += lineinput[j];
-	}
-	key = atoi(tmp);								// convert key from string to int
-}
+*/
