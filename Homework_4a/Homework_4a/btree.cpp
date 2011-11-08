@@ -30,6 +30,8 @@ void print(filereader &index);
 void split(char lineinput[], string &command, int &key);
 void add(filereader &index, int key);
 void writedata(filereader &index);
+void addKey(int key, bt_node &node);
+void initializeNode(filereader &index, int offset);
 
 void main(int argc, char* argv[])  {
 
@@ -50,7 +52,8 @@ void main(int argc, char* argv[])  {
 	int totalfinds = 0;						// Total number of times the find() routine is called
 	double telapsed = 0;					// Accumulator for elapsed time
 
-	writedata(index);
+	initializeNode(index, ROOT);
+//	writedata(index);
 
 	while ( 1 )  {
 		cin.getline(lineinput, 25);			// get a line of input from cin
@@ -88,14 +91,56 @@ void main(int argc, char* argv[])  {
 void add(filereader &index, int key)  {
 
 	bt_node node;
-
 	readNode(index, node);
+	cout << "Node size " << node.n << '\n';
+	if ( node.n < 32 )  {
+		addKey(key, node);
+		writeNode(index, node);
+	}
+	else 
+		cout << "\nOTHER CASES\n";
+}
+
+void addKey(int key, bt_node &node)  {
+
+	int swap1 = 0;
+	int swap2 = 0;
+	int swappos = -1;
+
+	if ( node.n == 0 ) {
+		node.n++;
+		node.key[0] = key;
+		return;
+	}
+
+	for (int i = 0; i < node.n; i++)  {
+		if ( key > node.key[i] )
+			;
+		else  {
+			swappos = i;
+			break;
+		}
+	}
+	if ( swappos == -1 )  {
+		node.key[node.n] = key;
+		node.n++;
+		return;
+	}
+	else  {
+		swap1 = node.key[swappos];
+		node.key[swappos] = key;
+		for (int i = swappos + 1; i < node.n + 1; i++)  {
+			swap2 = node.key[i];
+			node.key[i] = swap1;
+			swap1 = swap2;
+		}
+		node.n++;
+	}
 }
 
 long find(filereader &index, int key, bool addcall)  {		// index must be pointing to root node at first call
 
 	int orig_offset = index.offset();
-	//index.seek(ROOT, BEGIN);								// seek to root node
 	bt_node node;
 	readNode(index, node);
 	int indexfound = 0;
@@ -219,6 +264,22 @@ void writedata(filereader &index)  {
 		index.write_raw( (char*) &lngtmp, sizeof(long) );
 	}
 	index.seek(0, BEGIN);
+}
+
+void initializeNode(filereader &index, int offset)  {				// always returns index at position of beginning of new node
+
+	int zero = 0;
+	long minusone = -1;
+	index.seek(offset, BEGIN);
+	index.write_raw( (char*) &zero, sizeof(int) );
+
+	for ( int i = 0; i < 32; i++ ) {
+		index.write_raw( (char*) &zero, sizeof(int) );
+	}
+	for ( int i = 0; i < 33; i++)  {
+		index.write_raw( (char*) &minusone, sizeof(long) );
+	}
+	index.seek(offset, BEGIN);
 }
 
 /*
